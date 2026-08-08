@@ -7,7 +7,7 @@ prefix: RCFP-ORIENT
 
 ## Context and Design Philosophy
 
-Given a chosen print size (physical inches the crop will print at) and a target paper size, this component decides which of the paper's two orientations to use and exactly where to position the resized canvas relative to the current crop and any extra non-destructively-cropped layer data. It is the part of the plugin that turns a paper choice into concrete pixel placement.
+Given a chosen print size (physical inches the crop will print at) and a chosen paper size, this component decides which of the paper's two orientations to use and exactly where to position the resized canvas relative to the current crop and any extra non-destructively-cropped layer data. It is the part of the plugin that turns a paper choice into concrete pixel placement.
 
 The controlling principle is the HLD's primary tenet: losing part of the user's deliberate crop is categorically worse than padding with white or leaving available layer margin unused. Every comparison in this component is built to reflect that ordering, not a symmetric "smallest total deviation" metric.
 
@@ -20,11 +20,13 @@ The controlling principle is the HLD's primary tenet: losing part of the user's 
 
 ## Orientation Decision
 
-For each candidate orientation, the target canvas size in pixels is `target = paper_size_in * resolution` per axis.
+This decision only applies to a named preset, which has two candidate orientations. A Custom paper size is a single width/height the user typed directly, with no orientation to choose between — it skips this decision entirely (see Canvas Size Resolution below).
 
-**Primary criterion — crop loss.** Per axis, `crop_loss = max(0, crop_extent - target)²`, summed across both axes. This measures pixels that would be cut from the print itself (the crop's own pixel dimensions), which is impossible to avoid by drawing on bbox margin — it's a real, unavoidable loss of the user's deliberate crop. If the two orientations differ on this total at all, the one with the lower total wins outright and nothing else is considered.
+For each candidate orientation, the **canvas extent** — the size in pixels that orientation would produce — is `canvas_extent = paper_size_in * resolution` per axis. This is never the crop; it's always the (candidate) output size.
 
-**Tie-break — weighted cost.** When crop loss is tied between the two orientations (the common case — the bbox usually has enough spare layer data to cover either orientation without cropping the print), compare a weighted sum of three further per-axis costs, each computed as the scale-invariant
+**Primary criterion — crop loss.** Per axis, `crop_loss = max(0, crop_extent - canvas_extent)²`, summed across both axes. This measures pixels that would be cut from the print itself (the crop's own pixel dimensions), which is impossible to avoid by drawing on bbox margin — it's a real, unavoidable loss of the user's deliberate crop. If the two orientations differ on this total at all, the one with the lower total wins outright and nothing else is considered.
+
+**Tie-break — weighted cost.** When crop loss is tied between the two orientations (the common case — the paper size is usually big enough, at the print's resolution, to contain the whole crop in either orientation, so none of it needs trimming regardless of orientation), compare a weighted sum of three further per-axis costs, each computed as the scale-invariant
 
 ```
 cost(a, b) = (a - b)² / (a · b)   if a > b, else 0
@@ -32,18 +34,18 @@ cost(a, b) = (a - b)² / (a · b)   if a > b, else 0
 
 which stays comparable across wildly different pixel scales, unlike a raw squared-pixel difference:
 
-- **margin** — `cost(target, crop_extent)`: the target extends past the crop, drawing on bbox data. Weight **3**.
-- **content_loss** — `cost(bbox_extent, target)`: bbox data exists but is left out of the final canvas. Weight **1.5**.
-- **white_space** — `cost(target, bbox_extent)`: the target needs more than the bbox can supply — genuine, unavoidable padding. Weight **1**.
+- **margin** — `cost(canvas_extent, crop_extent)`: the canvas extent is bigger than the crop, drawing on bbox data to cover the difference. Weight **3**.
+- **content_loss** — `cost(bbox_extent, canvas_extent)`: bbox data exists but is left out of the canvas extent. Weight **1.5**.
+- **white_space** — `cost(canvas_extent, bbox_extent)`: the canvas extent is bigger than the bbox can supply — genuine, unavoidable padding. Weight **1**.
 
 The orientation with the lower weighted total wins; an exact tie goes to landscape.
 
 ## Placement Within an Axis
 
-Once an axis's target extent is fixed, its position is chosen by `placement_for_axis`:
+Once an axis's canvas extent is fixed (by the orientation decision above, or typed directly for a Custom size), its position is chosen by `placement_for_axis`:
 
-- If the target fits entirely within the bbox on that axis, clamp the crop-centered ideal position into the range where the target stays inside the bbox — using bbox margin to avoid cropping the crop when there's room, but never displacing the placement further than necessary.
-- If the target is bigger than the bbox on that axis (padding is unavoidable), center on the bbox instead of the crop, so the unavoidable padding is split evenly.
+- If the canvas extent fits entirely within the bbox on that axis, clamp the crop-centered ideal position into the range where the canvas extent stays inside the bbox — using bbox margin to avoid cropping the crop when there's room, but never displacing the placement further than necessary.
+- If the canvas extent is bigger than the bbox on that axis (padding is unavoidable), center on the bbox instead of the crop, so the unavoidable padding is split evenly.
 
 ## Canvas Size Resolution
 
@@ -58,7 +60,7 @@ Once an axis's target extent is fixed, its position is chosen by `placement_for_
 |---|---|---|---|
 | Primary orientation criterion | Hard gate on pixels cropped from the print itself (`crop_loss`), decisive whenever the two orientations differ | Minimize white space against the bbox alone; match the crop's own aspect ratio alone | Whitespace-only picks the wrong orientation when the bbox is much larger than the crop — it freely uses unrelated extra layer margin in a way that changes the photo's framing far more than the crop implied. Aspect-only ignores cases where the bbox gives a clearly better fit than the crop's own shape suggests. |
 | Tie-break metric | Weighted sum of three scale-invariant per-axis costs (`margin` ×3, `content_loss` ×1.5, `white_space` ×1) | Raw squared-pixel differences; log-ratio/aspect-mismatch scoring; matching the bbox's own aspect ratio alone | Raw pixel differences aren't comparable across images of very different pixel scale. Aspect/log-ratio scoring captures direction but not the actual amount of content at stake. Bbox-aspect matching alone can pick a "shape match" that still discards more content than a differently-shaped orientation would. The specific weights were tuned against worked examples — a near-square crop against a very tall source layer, and a thin sliver crop against its matching paper size — rather than derived analytically; revisit those cases if the weights change. |
-| Placement within an axis | Clamp the crop-centered ideal into the bbox range when the target fits; otherwise center on the bbox | Always center on the crop, ignoring extra bbox margin; always center on the full bbox, ignoring the crop | Always centering on the crop wastes available non-destructive-crop margin that could avoid padding. Always centering on the bbox abandons the crop's framing even in cases where it isn't necessary to. |
+| Placement within an axis | Clamp the crop-centered ideal into the bbox range when the canvas extent fits; otherwise center on the bbox | Always center on the crop, ignoring extra bbox margin; always center on the full bbox, ignoring the crop | Always centering on the crop wastes available non-destructive-crop margin that could avoid padding. Always centering on the bbox abandons the crop's framing even in cases where it isn't necessary to. |
 
 ## Open Questions & Future Decisions
 
