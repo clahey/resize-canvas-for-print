@@ -85,7 +85,7 @@ def default_print_size(crop_w, crop_h):
     return crop_w * scale, crop_h * scale
 
 
-def print_size_from_config(crop_w, crop_h, axis, value):
+def print_size_from_config(image, axis, value):
     """Default print size: whichever of width/height the user explicitly
     set last time (only one axis is remembered - the crop's aspect ratio
     will rarely match exactly between sessions, so re-deriving a stored
@@ -96,6 +96,8 @@ def print_size_from_config(crop_w, crop_h, axis, value):
     ratio, never remembered directly. `axis` is "width", "height", or ""
     (never set - e.g. the very first run).
     """
+    crop_w = image.get_width()
+    crop_h = image.get_height()
     fit_w, fit_h = default_print_size(crop_w, crop_h)
     aspect = crop_w / crop_h
     if axis == "width":
@@ -119,7 +121,7 @@ def _clamped_ratio_cost(bigger, smaller):
     return diff * diff / (bigger * smaller)
 
 
-def best_orientation(crop_w, crop_h, bbox, print_w_in, print_h_in, w_in, h_in):
+def best_orientation(image, print_w_in, print_h_in, w_in, h_in):
     """Given a canvas size as an unordered (w_in, h_in) pair, return
     whichever orientation - (w_in, h_in) or (h_in, w_in) - is the better
     fit.
@@ -141,9 +143,11 @@ def best_orientation(crop_w, crop_h, bbox, print_w_in, print_h_in, w_in, h_in):
         to draw on - genuine padding) - weight 1.
     Lower total wins; landscape wins an exact tie.
     """
+    crop_w = image.get_width()
+    crop_h = image.get_height()
     xres = crop_w / print_w_in
     yres = crop_h / print_h_in
-    bx0, by0, bx1, by1 = bbox
+    bx0, by0, bx1, by1 = get_visible_layers_bbox(image)
     bbox_w = bx1 - bx0
     bbox_h = by1 - by0
 
@@ -176,7 +180,7 @@ def best_orientation(crop_w, crop_h, bbox, print_w_in, print_h_in, w_in, h_in):
     return (h_in, w_in) if landscape_cost <= portrait_cost else (w_in, h_in)
 
 
-def get_canvas_size(preset_idx, crop_w, crop_h, bbox, print_w_in, print_h_in,
+def get_canvas_size(image, preset_idx, print_w_in, print_h_in,
                      custom_w_in, custom_h_in):
     """The canvas size to actually use, decided once (at OK time): the
     user's own values in Custom mode, otherwise the better-fitting
@@ -184,7 +188,7 @@ def get_canvas_size(preset_idx, crop_w, crop_h, bbox, print_w_in, print_h_in,
     _label, w, h = PRESETS[preset_idx]
     if w is None:  # Custom
         return custom_w_in, custom_h_in
-    return best_orientation(crop_w, crop_h, bbox, print_w_in, print_h_in, w, h)
+    return best_orientation(image, print_w_in, print_h_in, w, h)
 
 
 def run_resize_canvas_for_print(image, print_w_in, print_h_in, canvas_w_in, canvas_h_in):
@@ -227,13 +231,8 @@ def run_resize_canvas_for_print(image, print_w_in, print_h_in, canvas_w_in, canv
 def show_dialog(image, config):
     GimpUi.init("resize-canvas-for-print")
 
-    crop_w = image.get_width()
-    crop_h = image.get_height()
-    aspect = crop_w / crop_h  # width / height, locked for the print-size fields
-
-    bbox = get_visible_layers_bbox(image)
     default_print_w, default_print_h = print_size_from_config(
-        crop_w, crop_h, config.get_property("print-axis"), config.get_property("print-value")
+        image, config.get_property("print-axis"), config.get_property("print-value")
     )
     default_preset_index = config.get_property("preset-idx")
 
@@ -280,7 +279,7 @@ def show_dialog(image, config):
             return
         last_edited_axis["axis"] = "width"
         updating["flag"] = True
-        print_h_adj.set_value(print_w_adj.get_value() / aspect)
+        print_h_adj.set_value(print_w_adj.get_value() * image.get_height() / image.get_width())
         updating["flag"] = False
 
     def on_h_changed(_adj):
@@ -288,7 +287,7 @@ def show_dialog(image, config):
             return
         last_edited_axis["axis"] = "height"
         updating["flag"] = True
-        print_w_adj.set_value(print_h_adj.get_value() * aspect)
+        print_w_adj.set_value(print_h_adj.get_value() * image.get_width() / image.get_height())
         updating["flag"] = False
 
     print_w_adj.connect("value-changed", on_w_changed)
@@ -350,7 +349,7 @@ def show_dialog(image, config):
     result = None
     if response == Gtk.ResponseType.OK:
         canvas_w_in, canvas_h_in = get_canvas_size(
-            preset_combo.get_active(), crop_w, crop_h, bbox,
+            image, preset_combo.get_active(),
             print_w_adj.get_value(), print_h_adj.get_value(),
             canvas_w_adj.get_value(), canvas_h_adj.get_value(),
         )
@@ -425,15 +424,12 @@ class ResizeCanvasForPrint(Gimp.PlugIn):
             # WITH_LAST_VALS (Ctrl+F) or NONINTERACTIVE (scripted): config
             # is already populated by GIMP, either with the last-used
             # values or with whatever was passed explicitly - no dialog.
-            crop_w = image.get_width()
-            crop_h = image.get_height()
-            bbox = get_visible_layers_bbox(image)
             print_w, print_h = print_size_from_config(
-                crop_w, crop_h,
+                image,
                 config.get_property("print-axis"), config.get_property("print-value"),
             )
             canvas_w, canvas_h = get_canvas_size(
-                config.get_property("preset-idx"), crop_w, crop_h, bbox, print_w, print_h,
+                image, config.get_property("preset-idx"), print_w, print_h,
                 config.get_property("custom-width"), config.get_property("custom-height"),
             )
 
