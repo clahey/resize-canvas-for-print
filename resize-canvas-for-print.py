@@ -35,16 +35,19 @@ def get_visible_layers_bbox(image):
     if not layers:
         layers = image.get_layers()
 
-    x0 = y0 = x1 = y1 = None
+    boxes = []
     for layer in layers:
         _success, ox, oy = layer.get_offsets()
         w = layer.get_width()
         h = layer.get_height()
-        x0 = ox if x0 is None else min(x0, ox)
-        y0 = oy if y0 is None else min(y0, oy)
-        x1 = ox + w if x1 is None else max(x1, ox + w)
-        y1 = oy + h if y1 is None else max(y1, oy + h)
-    return x0, y0, x1, y1
+        boxes.append({"x0": ox, "y0": oy, "x1": ox + w, "y1": oy + h})
+
+    return (
+        min(b["x0"] for b in boxes),
+        min(b["y0"] for b in boxes),
+        max(b["x1"] for b in boxes),
+        max(b["y1"] for b in boxes),
+    )
 
 
 def placement_for_axis(crop_extent, bbox_lo, bbox_hi, target_extent):
