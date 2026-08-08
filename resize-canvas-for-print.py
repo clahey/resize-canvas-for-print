@@ -238,7 +238,9 @@ def show_dialog(image, config):
     # dialog factory - monitor-aware positioning, geometry memory, etc.
     # That alone isn't enough in every display environment though, so
     # request centering explicitly too.
-    dialog = GimpUi.Dialog(title="Resize Canvas for Print", role="resize-canvas-for-print")
+    use_header_bar = Gtk.Settings.get_default().get_property("gtk-dialogs-use-header")
+    dialog = GimpUi.Dialog(title="Resize Canvas for Print", role="resize-canvas-for-print",
+                            use_header_bar=use_header_bar)
     dialog.set_position(Gtk.WindowPosition.CENTER)
     dialog.add_button("_Cancel", Gtk.ResponseType.CANCEL)
     dialog.add_button("_OK", Gtk.ResponseType.OK)
