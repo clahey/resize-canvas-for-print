@@ -12,7 +12,8 @@ import gi
 
 gi.require_version("Gimp", "3.0")
 gi.require_version("GimpUi", "3.0")
-from gi.repository import Gimp, GimpUi, GLib, GObject, Gtk  # noqa: E402
+gi.require_version("Gegl", "0.4")
+from gi.repository import Gegl, Gimp, GimpUi, GLib, GObject, Gtk  # noqa: E402
 
 PROC_NAME = "python-fu-resize-canvas-for-print"
 
@@ -206,6 +207,14 @@ def run_resize_canvas_for_print(image, print_w_in, print_h_in, canvas_w_in, canv
         offy = int(round(-new_top))
 
         image.resize(target_w, target_h, offx, offy)
+
+        Gimp.context_push()
+        try:
+            Gimp.context_set_background(Gegl.Color.new("white"))
+            for layer in image.get_layers():
+                layer.resize_to_image_size()
+        finally:
+            Gimp.context_pop()
     finally:
         image.undo_group_end()
 
@@ -363,6 +372,8 @@ class ResizeCanvasForPrint(Gimp.PlugIn):
         return [PROC_NAME]
 
     def do_create_procedure(self, name):
+        Gegl.init(None)
+
         procedure = Gimp.ImageProcedure.new(
             self, name, Gimp.PDBProcType.PLUGIN, self.run, None
         )
