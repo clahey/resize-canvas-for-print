@@ -10,18 +10,11 @@ def mock_gimp():
     """Patches Gimp/GLib/Gegl at module level so plugin code can run
     outside a real GIMP process. Constructing a real GLib.Error() or a
     Gimp.PlugIn subclass outside an actual plugin process hard-aborts the
-    interpreter (not a catchable exception) - sentinel RunMode/PDBStatusType
-    values sidestep this."""
-    mock = MagicMock()
-    mock.RunMode.INTERACTIVE = "INTERACTIVE"
-    mock.RunMode.WITH_LAST_VALS = "WITH_LAST_VALS"
-    mock.RunMode.NONINTERACTIVE = "NONINTERACTIVE"
-    mock.PDBStatusType.SUCCESS = "SUCCESS"
-    mock.PDBStatusType.CANCEL = "CANCEL"
-    with patch.object(rcfp, "Gimp", mock), \
+    interpreter (not a catchable exception) - mocking sidesteps this."""
+    with patch.object(rcfp, "Gimp") as gimp_mock, \
             patch.object(rcfp, "GLib"), \
             patch.object(rcfp, "Gegl"):
-        yield mock
+        yield gimp_mock
 
 
 @pytest.fixture
