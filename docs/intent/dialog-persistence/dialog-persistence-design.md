@@ -49,7 +49,13 @@ Only the last *edited* print-size axis is remembered, not both numbers. The prin
 ## Open Questions & Future Decisions
 
 ### Deferred
-1. Unit selection (inches/cm/mm/etc.) for the print-size and custom-canvas fields, via `GimpUi.SizeEntry` with its own fields bound to our existing spin buttons (`add_field`, `show_refval=False`, `update_policy=NONE`) and the two size-entry widgets' unit combos kept in sync with each other. Investigated but not yet implemented.
+1. **Unit selection** (inches/cm/mm/etc.) for the print-size and custom-canvas fields, including a full paper-size preset list, and automatic conversion of the displayed value when the unit changes. Not yet implemented; an investigated approach is recorded below so the work doesn't need to be re-investigated from scratch.
+
+   - **Widget**: `GimpUi.SizeEntry`, a composite widget pairing one or more numeric fields with a single shared unit dropdown. Changing the dropdown converts the field's displayed value in place, which covers the automatic-conversion requirement without custom conversion math.
+   - **Rejected building block**: `GimpUi.UnitComboBox` alone — just the unit dropdown, with no field-conversion behavior of its own — was considered and rejected in favor of `GimpUi.SizeEntry`, which provides that conversion for free.
+   - **Integration with the existing fields**: rather than replacing the print-size and Custom width/height spin buttons, a `GimpUi.SizeEntry` would wrap each via `add_field(spin_button, ...)`, with `show_refval=False` (the entry should not also draw its own duplicate numeric field alongside the existing spin button) and `update_policy=NONE` (the entry should not overwrite field values on its own; resolution changes stay managed explicitly by the plugin, per `RCFP-DIALOG-APPLY-001`).
+   - **Two independent groups**: the dialog has two size groups — print size and Custom canvas size — and a single `GimpUi.SizeEntry` instance only drives one shared unit dropdown for its own fields, so this would need two separate instances. Keeping their two unit dropdowns in sync with each other (so picking cm in one switches the other) is not automatic and would need an explicit signal connection between the two instances.
+   - Reference consulted for `add_field`/`show_refval`/`update_policy` semantics: the `GimpSizeEntry` C API reference, https://www.manpagez.com/html/libgimpwidgets/libgimpwidgets-2.10.34/GimpSizeEntry.php (PyGObject exposes the same properties/methods; no Python-specific documentation for this widget was found).
 
 ## References
 

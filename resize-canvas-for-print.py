@@ -438,4 +438,5 @@ class ResizeCanvasForPrint(Gimp.PlugIn):
         return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, GLib.Error())
 
 
-Gimp.main(ResizeCanvasForPrint.__gtype__, sys.argv)
+if __name__ == "__main__":
+    Gimp.main(ResizeCanvasForPrint.__gtype__, sys.argv)
