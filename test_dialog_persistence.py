@@ -66,6 +66,7 @@ def test_print_size_from_config_height_axis_below_fit_kept_and_width_rederived()
 
 # --- apply (RCFP-DIALOG-APPLY-001, 003, 004) -------------------------------
 
+@pytest.fixture
 def default_config():
     return make_config({
         "print-axis": "",
@@ -77,14 +78,14 @@ def default_config():
 
 
 # @spec RCFP-DIALOG-APPLY-001, RCFP-DIALOG-APPLY-003, RCFP-DIALOG-APPLY-004
-def test_apply_sets_resolution_and_resizes_layers_white(run_plugin):
+def test_apply_sets_resolution_and_resizes_layers_white(run_plugin, default_config):
     image = make_image(828, 829, [
         make_layer(-1702, -2062, 4096, 6144),
         make_layer(-1702, -2062, 4096, 6144),
     ])
 
     with patch.object(rcfp, "print_size_from_config", return_value=(1.0, 1.0012077)):
-        run_plugin(image, default_config(), rcfp.Gimp.RunMode.WITH_LAST_VALS)
+        run_plugin(image, default_config, rcfp.Gimp.RunMode.WITH_LAST_VALS)
 
     image.set_resolution.assert_called_once()
     xres, yres = image.set_resolution.call_args.args
@@ -106,12 +107,12 @@ def test_apply_sets_resolution_and_resizes_layers_white(run_plugin):
 
 @pytest.mark.parametrize("run_mode_name", ["WITH_LAST_VALS", "NONINTERACTIVE"])
 # @spec RCFP-DIALOG-PERSIST-005
-def test_non_interactive_modes_skip_dialog_and_apply_config(run_plugin, run_mode_name):
+def test_non_interactive_modes_skip_dialog_and_apply_config(run_plugin, default_config, run_mode_name):
     image = make_image(828, 829, [make_layer(-1702, -2062, 4096, 6144)])
 
     with patch.object(rcfp, "show_dialog",
                        side_effect=AssertionError(f"dialog should not show for {run_mode_name}")):
-        run_plugin(image, default_config(), getattr(rcfp.Gimp.RunMode, run_mode_name))
+        run_plugin(image, default_config, getattr(rcfp.Gimp.RunMode, run_mode_name))
 
     image.resize.assert_called_once()
 
