@@ -27,6 +27,23 @@ PRESETS = [
     ("Custom", None, None),
 ]
 
+# GIMP's built-in physical length units (pixels and percent excluded - see
+# RCFP-DIALOG-UNIT-006). GIMP has no built-in centimeter unit.
+UNITS_PER_INCH = {
+    "in": 1.0,
+    "mm": 25.4,
+    "pt": 72.0,
+    "pica": 6.0,
+}
+
+
+def to_inches(value, unit):
+    return value / UNITS_PER_INCH[unit]
+
+
+def from_inches(value_in, unit):
+    return value_in * UNITS_PER_INCH[unit]
+
 
 def get_visible_layers_bbox(image):
     """Union bounding box (in image/canvas coordinates) of all visible
@@ -228,12 +245,37 @@ def run_resize_canvas_for_print(image, print_w_in, print_h_in, canvas_w_in, canv
     Gimp.displays_flush()
 
 
+def _gimp_unit_for_key(unit_key):
+    return {
+        "in": Gimp.Unit.inch(),
+        "mm": Gimp.Unit.mm(),
+        "pt": Gimp.Unit.point(),
+        "pica": Gimp.Unit.pica(),
+    }[unit_key]
+
+
+def _key_for_gimp_unit(unit):
+    for key in UNITS_PER_INCH:
+        if _gimp_unit_for_key(key) == unit:
+            return key
+    return "in"
+
+
 def show_dialog(image, config):
     GimpUi.init("resize-canvas-for-print")
 
-    default_print_w, default_print_h = print_size_from_config(
-        image, config.get_property("print-axis"), config.get_property("print-value")
+    default_print_unit = config.get_property("print-unit")
+    default_custom_unit = config.get_property("custom-unit")
+
+    # print-value is stored in print-unit, not inches (RCFP-DIALOG-PERSIST-010) -
+    # convert to inches for the fit/clamp computation, then back to
+    # print-unit for display (RCFP-DIALOG-PERSIST-004/007).
+    default_print_w_in, default_print_h_in = print_size_from_config(
+        image, config.get_property("print-axis"),
+        to_inches(config.get_property("print-value"), default_print_unit),
     )
+    default_print_w = from_inches(default_print_w_in, default_print_unit)
+    default_print_h = from_inches(default_print_h_in, default_print_unit)
     default_preset_index = config.get_property("preset-idx")
 
     # GimpUi.Dialog (not plain Gtk.Dialog) registers with GIMP's own
@@ -253,8 +295,22 @@ def show_dialog(image, config):
 
     row = 0
     label = Gtk.Label(xalign=0)
-    label.set_markup("<b>Print size (in)</b>")
+    label.set_markup("<b>Print size</b>")
     grid.attach(label, 0, row, 2, 1)
+    row += 1
+
+    # A plain dropdown, not GimpUi.SizeEntry/UnitComboBox: SizeEntry bundles
+    # its own spin button(s) with the unit dropdown into one widget with no
+    # way to drive the aspect-locked width/height fields below externally,
+    # and stock UnitComboBox has no confirmed way to exclude pixels/percent
+    # (RCFP-DIALOG-UNIT-006). See dialog-persistence-design.md's Decisions
+    # table for the full rationale.
+    print_unit_combo = Gtk.ComboBoxText()
+    for unit_key in UNITS_PER_INCH:
+        print_unit_combo.append_text(unit_key)
+    print_unit_combo.set_active(list(UNITS_PER_INCH).index(default_print_unit))
+    grid.attach(Gtk.Label(label="Unit:", xalign=0), 0, row, 1, 1)
+    grid.attach(print_unit_combo, 1, row, 1, 1)
     row += 1
 
     print_w_adj = Gtk.Adjustment(value=default_print_w, lower=0.1, upper=100,
@@ -273,6 +329,7 @@ def show_dialog(image, config):
 
     updating = {"flag": False}
     last_edited_axis = {"axis": config.get_property("print-axis") or None}
+    current_print_unit = {"unit": default_print_unit}
 
     def on_w_changed(_adj):
         if updating["flag"]:
@@ -293,6 +350,26 @@ def show_dialog(image, config):
     print_w_adj.connect("value-changed", on_w_changed)
     print_h_adj.connect("value-changed", on_h_changed)
 
+    def on_print_unit_changed(combo):
+        new_unit = list(UNITS_PER_INCH)[combo.get_active()]
+        old_unit = current_print_unit["unit"]
+        if new_unit == old_unit:
+            return
+        current_print_unit["unit"] = new_unit
+        axis = last_edited_axis["axis"] or "width"
+        # Same re-entrancy guard on_w_changed/on_h_changed use, so this
+        # conversion isn't mistaken for a user edit (RCFP-DIALOG-UNIT-003).
+        updating["flag"] = True
+        if axis == "height":
+            print_h_adj.set_value(from_inches(to_inches(print_h_adj.get_value(), old_unit), new_unit))
+            print_w_adj.set_value(print_h_adj.get_value() * image.get_width() / image.get_height())
+        else:
+            print_w_adj.set_value(from_inches(to_inches(print_w_adj.get_value(), old_unit), new_unit))
+            print_h_adj.set_value(print_w_adj.get_value() * image.get_height() / image.get_width())
+        updating["flag"] = False
+
+    print_unit_combo.connect("changed", on_print_unit_changed)
+
     grid.attach(Gtk.Separator(), 0, row, 2, 1)
     row += 1
 
@@ -310,35 +387,32 @@ def show_dialog(image, config):
 
     # Only meaningful in Custom mode - the user types directly into these.
     # For named presets, orientation/size is decided once, at OK time (see
-    # get_canvas_size below), not live while the dialog is open.
+    # get_canvas_size below), not live while the dialog is open. Unlike
+    # print size, Custom's width/height have no other cross-field
+    # bookkeeping to protect, so a real GimpUi.SizeEntry can own these
+    # fields directly - standard usage, unlike print size above.
+    # NEEDS LIVE-GIMP VERIFICATION: exact GimpUi.SizeEntry/attach_label
+    # PyGObject call shapes below are inferred from the C API reference
+    # (see dialog-persistence-design.md References), not tested against a
+    # running GIMP.
     starting_w = config.get_property("custom-width")
     starting_h = config.get_property("custom-height")
-    canvas_w_adj = Gtk.Adjustment(value=starting_w, lower=0.1, upper=100,
-                                   step_increment=0.1, page_increment=1)
-    canvas_h_adj = Gtk.Adjustment(value=starting_h, lower=0.1, upper=100,
-                                   step_increment=0.1, page_increment=1)
-    canvas_w_spin = Gtk.SpinButton(adjustment=canvas_w_adj, digits=2)
-    canvas_h_spin = Gtk.SpinButton(adjustment=canvas_h_adj, digits=2)
+    custom_size_entry = GimpUi.SizeEntry.new(
+        2, _gimp_unit_for_key(default_custom_unit), "%a",
+        False, False, False, 8, GimpUi.SizeEntryUpdatePolicy.NONE)
+    custom_size_entry.attach_label("Width:", 0, 0, 0.0)
+    custom_size_entry.attach_label("Height:", 1, 0, 0.0)
+    custom_size_entry.set_value(0, starting_w)
+    custom_size_entry.set_value(1, starting_h)
+    custom_size_entry.set_no_show_all(True)
 
-    canvas_w_label = Gtk.Label(label="Width:", xalign=0)
-    canvas_h_label = Gtk.Label(label="Height:", xalign=0)
-    grid.attach(canvas_w_label, 0, row, 1, 1)
-    grid.attach(canvas_w_spin, 1, row, 1, 1)
+    grid.attach(custom_size_entry, 0, row, 2, 1)
     row += 1
-    grid.attach(canvas_h_label, 0, row, 1, 1)
-    grid.attach(canvas_h_spin, 1, row, 1, 1)
-    row += 1
-
-    for widget in (canvas_w_label, canvas_h_label, canvas_w_spin, canvas_h_spin):
-        widget.set_no_show_all(True)
 
     def on_preset_changed(combo):
         idx = combo.get_active()
         is_custom = PRESETS[idx][1] is None
-        canvas_w_label.set_visible(is_custom)
-        canvas_h_label.set_visible(is_custom)
-        canvas_w_spin.set_visible(is_custom)
-        canvas_h_spin.set_visible(is_custom)
+        custom_size_entry.set_visible(is_custom)
 
     preset_combo.connect("changed", on_preset_changed)
 
@@ -348,25 +422,32 @@ def show_dialog(image, config):
 
     result = None
     if response == Gtk.ResponseType.OK:
+        print_unit = current_print_unit["unit"]
+        custom_unit = _key_for_gimp_unit(custom_size_entry.get_unit())
+        # print_w_adj/print_h_adj and custom_size_entry's fields are in
+        # print_unit/custom_unit, not inches - convert before calling
+        # get_canvas_size, which (like the rest of Orientation & Placement)
+        # only ever works in inches (RCFP-DIALOG-UNIT-005).
+        print_w_in = to_inches(print_w_adj.get_value(), print_unit)
+        print_h_in = to_inches(print_h_adj.get_value(), print_unit)
+        custom_w_in = to_inches(custom_size_entry.get_value(0), custom_unit)
+        custom_h_in = to_inches(custom_size_entry.get_value(1), custom_unit)
         canvas_w_in, canvas_h_in = get_canvas_size(
             image, preset_combo.get_active(),
-            print_w_adj.get_value(), print_h_adj.get_value(),
-            canvas_w_adj.get_value(), canvas_h_adj.get_value(),
+            print_w_in, print_h_in,
+            custom_w_in, custom_h_in,
         )
-        result = (
-            print_w_adj.get_value(),
-            print_h_adj.get_value(),
-            canvas_w_in,
-            canvas_h_in,
-        )
+        result = (print_w_in, print_h_in, canvas_w_in, canvas_h_in)
         config.set_property("print-axis", last_edited_axis["axis"] or "")
         config.set_property(
             "print-value",
             print_h_adj.get_value() if last_edited_axis["axis"] == "height" else print_w_adj.get_value(),
         )
+        config.set_property("print-unit", print_unit)
         config.set_property("preset-idx", preset_combo.get_active())
-        config.set_property("custom-width", canvas_w_adj.get_value())
-        config.set_property("custom-height", canvas_h_adj.get_value())
+        config.set_property("custom-width", custom_size_entry.get_value(0))
+        config.set_property("custom-height", custom_size_entry.get_value(1))
+        config.set_property("custom-unit", custom_unit)
     dialog.destroy()
     return result
 
@@ -411,6 +492,14 @@ class ResizeCanvasForPrint(Gimp.PlugIn):
         procedure.add_double_argument(
             "custom-height", "Custom canvas height", "Custom canvas height, in inches",
             0.1, 100.0, PRESETS[0][2], GObject.ParamFlags.READWRITE)
+        procedure.add_string_argument(
+            "print-unit", "Print size unit",
+            "Unit print-value is stored in ('in', 'mm', 'pt', or 'pica')",
+            "in", GObject.ParamFlags.READWRITE)
+        procedure.add_string_argument(
+            "custom-unit", "Custom canvas unit",
+            "Unit custom-width/custom-height are stored in ('in', 'mm', 'pt', or 'pica')",
+            "in", GObject.ParamFlags.READWRITE)
 
         return procedure
 
@@ -424,13 +513,21 @@ class ResizeCanvasForPrint(Gimp.PlugIn):
             # WITH_LAST_VALS (Ctrl+F) or NONINTERACTIVE (scripted): config
             # is already populated by GIMP, either with the last-used
             # values or with whatever was passed explicitly - no dialog.
+            # print-value/custom-width/custom-height are stored in
+            # print-unit/custom-unit, not inches (RCFP-DIALOG-PERSIST-010) -
+            # convert to inches before any computation (RCFP-DIALOG-UNIT-005).
+            print_value_in = to_inches(
+                config.get_property("print-value"), config.get_property("print-unit"))
             print_w, print_h = print_size_from_config(
-                image,
-                config.get_property("print-axis"), config.get_property("print-value"),
+                image, config.get_property("print-axis"), print_value_in,
             )
+            custom_w_in = to_inches(
+                config.get_property("custom-width"), config.get_property("custom-unit"))
+            custom_h_in = to_inches(
+                config.get_property("custom-height"), config.get_property("custom-unit"))
             canvas_w, canvas_h = get_canvas_size(
                 image, config.get_property("preset-idx"), print_w, print_h,
-                config.get_property("custom-width"), config.get_property("custom-height"),
+                custom_w_in, custom_h_in,
             )
 
         run_resize_canvas_for_print(image, print_w, print_h, canvas_w, canvas_h)

@@ -22,9 +22,11 @@ def default_config(preset_idx=NON_CUSTOM_PRESET_IDX, custom_w=4.0, custom_h=6.0)
     return make_config({
         "print-axis": "",
         "print-value": 6.0,
+        "print-unit": "in",
         "preset-idx": preset_idx,
         "custom-width": custom_w,
         "custom-height": custom_h,
+        "custom-unit": "in",
     })
 
 

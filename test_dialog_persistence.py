@@ -11,8 +11,15 @@ output.
 show_dialog itself is intentionally not covered here - it constructs real
 GTK widgets and blocks on a real event loop, and there's no lightweight GTK
 test framework available to drive that without a real (or headless)
-display. PERSIST-002/003 and APPLY-005, whose logic lives inside
-show_dialog, stay manually/live-verified for the same reason.
+display. PERSIST-002/003/009/011, APPLY-005, and UNIT-001/002/003/004/006,
+whose logic lives inside show_dialog, stay manually/live-verified for the
+same reason - as do PERSIST-004/006/007's unit-conversion-for-display
+clauses specifically (their underlying fit/default computation is still
+covered directly, per above).
+
+PERSIST-001/008 (declaring PDB arguments and their defaults in
+do_create_procedure) are a real, closeable gap left untested by choice -
+that function is never exercised here.
 """
 
 from unittest.mock import MagicMock, patch
@@ -64,6 +71,55 @@ def test_print_size_from_config_height_axis_below_fit_kept_and_width_rederived()
     assert (w, h) == pytest.approx((3.0, 2.0))
 
 
+# --- unit conversion (RCFP-DIALOG-UNIT-005) ---------------------------------
+
+@pytest.mark.parametrize("unit,per_inch", [
+    ("in", 1.0),
+    ("mm", 25.4),
+    ("pt", 72.0),
+    ("pica", 6.0),
+])
+# @spec RCFP-DIALOG-UNIT-005
+def test_to_inches_converts_one_unit_of_each_kind_to_one_inch(unit, per_inch):
+    assert rcfp.to_inches(per_inch, unit) == pytest.approx(1.0)
+
+
+# @spec RCFP-DIALOG-UNIT-005
+def test_from_inches_undoes_to_inches():
+    for unit in ("in", "mm", "pt", "pica"):
+        assert rcfp.from_inches(rcfp.to_inches(5.0, unit), unit) == pytest.approx(5.0)
+
+
+# @spec RCFP-DIALOG-UNIT-005, RCFP-DIALOG-PERSIST-010
+def test_non_interactive_run_converts_persisted_units_to_inches(run_plugin):
+    # Landscape 2:1 crop. print-value is 1 inch stored as 72pt;
+    # custom-width/height are 1in/2in stored as 25.4mm/50.8mm. If the
+    # stored numbers were used as-is (without unit conversion) the
+    # resulting resolution and canvas size would be wildly different.
+    crop_w, crop_h = 2000, 1000
+    image = make_image(crop_w, crop_h, [make_layer(0, 0, crop_w, crop_h)])
+    config = make_config({
+        "print-axis": "width",
+        "print-value": 72.0,
+        "print-unit": "pt",
+        "preset-idx": len(rcfp.PRESETS) - 1,  # Custom
+        "custom-width": 25.4,
+        "custom-height": 50.8,
+        "custom-unit": "mm",
+    })
+
+    run_plugin(image, config, rcfp.Gimp.RunMode.WITH_LAST_VALS)
+
+    image.set_resolution.assert_called_once()
+    xres, yres = image.set_resolution.call_args.args
+    assert (xres, yres) == pytest.approx((2000.0, 2000.0))
+
+    image.resize.assert_called_once()
+    target_w, target_h, offx, offy = image.resize.call_args.args
+    assert (target_w, target_h) == (2000, 4000)
+    assert (offx, offy) == (0, 1500)
+
+
 # --- apply (RCFP-DIALOG-APPLY-001, 003, 004) -------------------------------
 
 @pytest.fixture
@@ -71,9 +127,11 @@ def default_config():
     return make_config({
         "print-axis": "",
         "print-value": 6.0,
+        "print-unit": "in",
         "preset-idx": len(rcfp.PRESETS) - 1,  # Custom - isolates apply from orientation
         "custom-width": 4.0,
         "custom-height": 6.0,
+        "custom-unit": "in",
     })
 
 
