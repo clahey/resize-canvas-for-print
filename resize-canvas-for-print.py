@@ -36,6 +36,12 @@ UNITS_PER_INCH = {
     "pica": 6.0,
 }
 
+# Print-size and Custom-canvas-size field bounds, fixed in inches and
+# converted to whichever unit is selected - a flat 0.1-100 range in every
+# unit would let pt/pica max out below a single inch. See RCFP-DIALOG-UNIT-007.
+SIZE_FIELD_LOWER_IN = 0.1
+SIZE_FIELD_UPPER_IN = 100.0
+
 
 def to_inches(value, unit):
     return value / UNITS_PER_INCH[unit]
@@ -43,6 +49,14 @@ def to_inches(value, unit):
 
 def from_inches(value_in, unit):
     return value_in * UNITS_PER_INCH[unit]
+
+
+def size_field_bounds(unit):
+    """(lower, upper) for a print-size or Custom-canvas-size field, in
+    `unit` - fixed in inches (SIZE_FIELD_LOWER_IN/SIZE_FIELD_UPPER_IN) and
+    converted, so the usable range doesn't shrink in a smaller unit
+    (RCFP-DIALOG-UNIT-007)."""
+    return from_inches(SIZE_FIELD_LOWER_IN, unit), from_inches(SIZE_FIELD_UPPER_IN, unit)
 
 
 def get_visible_layers_bbox(image):
@@ -293,38 +307,41 @@ def show_dialog(image, config):
     grid = Gtk.Grid(column_spacing=8, row_spacing=6, border_width=8)
     dialog.get_content_area().add(grid)
 
+    # Layout matches GIMP's own size-entry dialogs (e.g. Canvas Size): width
+    # above height, with a single unit dropdown beside the height field -
+    # not a separate row of its own, and the same shape for both groups
+    # below. GimpUi.SizeEntry's own bundled layout didn't reliably produce
+    # this when tried (see dialog-persistence-design.md's Decisions table),
+    # so both groups build it explicitly instead: plain spin buttons plus a
+    # real GimpUi.UnitComboBox, wired up by hand.
     row = 0
     label = Gtk.Label(xalign=0)
     label.set_markup("<b>Print size</b>")
-    grid.attach(label, 0, row, 2, 1)
+    grid.attach(label, 0, row, 3, 1)
     row += 1
 
-    # A plain dropdown, not GimpUi.SizeEntry/UnitComboBox: SizeEntry bundles
-    # its own spin button(s) with the unit dropdown into one widget with no
-    # way to drive the aspect-locked width/height fields below externally,
-    # and stock UnitComboBox has no confirmed way to exclude pixels/percent
-    # (RCFP-DIALOG-UNIT-006). See dialog-persistence-design.md's Decisions
-    # table for the full rationale.
-    print_unit_combo = Gtk.ComboBoxText()
-    for unit_key in UNITS_PER_INCH:
-        print_unit_combo.append_text(unit_key)
-    print_unit_combo.set_active(list(UNITS_PER_INCH).index(default_print_unit))
-    grid.attach(Gtk.Label(label="Unit:", xalign=0), 0, row, 1, 1)
-    grid.attach(print_unit_combo, 1, row, 1, 1)
-    row += 1
-
-    print_w_adj = Gtk.Adjustment(value=default_print_w, lower=0.1, upper=100,
+    default_print_lower, default_print_upper = size_field_bounds(default_print_unit)
+    print_w_adj = Gtk.Adjustment(value=default_print_w,
+                                  lower=default_print_lower, upper=default_print_upper,
                                   step_increment=0.1, page_increment=1)
-    print_h_adj = Gtk.Adjustment(value=default_print_h, lower=0.1, upper=100,
+    print_h_adj = Gtk.Adjustment(value=default_print_h,
+                                  lower=default_print_lower, upper=default_print_upper,
                                   step_increment=0.1, page_increment=1)
     print_w_spin = Gtk.SpinButton(adjustment=print_w_adj, digits=2)
     print_h_spin = Gtk.SpinButton(adjustment=print_h_adj, digits=2)
+    # NEEDS LIVE-GIMP VERIFICATION: GimpUi.UnitComboBox has no confirmed way
+    # to exclude pixels/percent (RCFP-DIALOG-UNIT-006); an unrecognized
+    # selection falls back to "in" via _key_for_gimp_unit rather than
+    # crashing, but pixels/percent may still be selectable in practice.
+    print_unit_combo = GimpUi.UnitComboBox.new()
+    print_unit_combo.set_unit(_gimp_unit_for_key(default_print_unit))
 
     grid.attach(Gtk.Label(label="Width:", xalign=0), 0, row, 1, 1)
     grid.attach(print_w_spin, 1, row, 1, 1)
     row += 1
     grid.attach(Gtk.Label(label="Height:", xalign=0), 0, row, 1, 1)
     grid.attach(print_h_spin, 1, row, 1, 1)
+    grid.attach(print_unit_combo, 2, row, 1, 1)
     row += 1
 
     updating = {"flag": False}
@@ -351,7 +368,7 @@ def show_dialog(image, config):
     print_h_adj.connect("value-changed", on_h_changed)
 
     def on_print_unit_changed(combo):
-        new_unit = list(UNITS_PER_INCH)[combo.get_active()]
+        new_unit = _key_for_gimp_unit(combo.get_unit())
         old_unit = current_print_unit["unit"]
         if new_unit == old_unit:
             return
@@ -360,6 +377,11 @@ def show_dialog(image, config):
         # Same re-entrancy guard on_w_changed/on_h_changed use, so this
         # conversion isn't mistaken for a user edit (RCFP-DIALOG-UNIT-003).
         updating["flag"] = True
+        new_lower, new_upper = size_field_bounds(new_unit)
+        print_w_adj.set_lower(new_lower)
+        print_w_adj.set_upper(new_upper)
+        print_h_adj.set_lower(new_lower)
+        print_h_adj.set_upper(new_upper)
         if axis == "height":
             print_h_adj.set_value(from_inches(to_inches(print_h_adj.get_value(), old_unit), new_unit))
             print_w_adj.set_value(print_h_adj.get_value() * image.get_width() / image.get_height())
@@ -370,51 +392,79 @@ def show_dialog(image, config):
 
     print_unit_combo.connect("changed", on_print_unit_changed)
 
-    grid.attach(Gtk.Separator(), 0, row, 2, 1)
+    grid.attach(Gtk.Separator(), 0, row, 3, 1)
     row += 1
 
     label = Gtk.Label(xalign=0)
     label.set_markup("<b>Output canvas</b>")
-    grid.attach(label, 0, row, 2, 1)
+    grid.attach(label, 0, row, 3, 1)
     row += 1
 
     preset_combo = Gtk.ComboBoxText()
     for preset_label, _w, _h in PRESETS:
         preset_combo.append_text(preset_label)
     preset_combo.set_active(default_preset_index)
-    grid.attach(preset_combo, 0, row, 2, 1)
+    grid.attach(preset_combo, 0, row, 3, 1)
     row += 1
 
     # Only meaningful in Custom mode - the user types directly into these.
     # For named presets, orientation/size is decided once, at OK time (see
-    # get_canvas_size below), not live while the dialog is open. Unlike
-    # print size, Custom's width/height have no other cross-field
-    # bookkeeping to protect, so a real GimpUi.SizeEntry can own these
-    # fields directly - standard usage, unlike print size above.
-    # NEEDS LIVE-GIMP VERIFICATION: exact GimpUi.SizeEntry/attach_label
-    # PyGObject call shapes below are inferred from the C API reference
-    # (see dialog-persistence-design.md References), not tested against a
-    # running GIMP.
+    # get_canvas_size below), not live while the dialog is open. Custom's
+    # width/height have no aspect lock or last-edited-axis to protect, so
+    # unit conversion here doesn't need the re-entrancy guard above - both
+    # fields just convert directly.
     starting_w = config.get_property("custom-width")
     starting_h = config.get_property("custom-height")
-    custom_size_entry = GimpUi.SizeEntry.new(
-        2, _gimp_unit_for_key(default_custom_unit), "%a",
-        False, False, False, 8, GimpUi.SizeEntryUpdatePolicy.NONE)
-    custom_size_entry.attach_label("Width:", 0, 0, 0.0)
-    custom_size_entry.attach_label("Height:", 1, 0, 0.0)
-    custom_size_entry.set_value(0, starting_w)
-    custom_size_entry.set_value(1, starting_h)
-    custom_size_entry.set_no_show_all(True)
+    default_custom_lower, default_custom_upper = size_field_bounds(default_custom_unit)
+    custom_w_adj = Gtk.Adjustment(value=starting_w,
+                                   lower=default_custom_lower, upper=default_custom_upper,
+                                   step_increment=0.1, page_increment=1)
+    custom_h_adj = Gtk.Adjustment(value=starting_h,
+                                   lower=default_custom_lower, upper=default_custom_upper,
+                                   step_increment=0.1, page_increment=1)
+    custom_w_spin = Gtk.SpinButton(adjustment=custom_w_adj, digits=2)
+    custom_h_spin = Gtk.SpinButton(adjustment=custom_h_adj, digits=2)
+    custom_unit_combo = GimpUi.UnitComboBox.new()
+    custom_unit_combo.set_unit(_gimp_unit_for_key(default_custom_unit))
+    current_custom_unit = {"unit": default_custom_unit}
 
-    grid.attach(custom_size_entry, 0, row, 2, 1)
+    custom_w_label = Gtk.Label(label="Width:", xalign=0)
+    custom_h_label = Gtk.Label(label="Height:", xalign=0)
+    grid.attach(custom_w_label, 0, row, 1, 1)
+    grid.attach(custom_w_spin, 1, row, 1, 1)
     row += 1
+    grid.attach(custom_h_label, 0, row, 1, 1)
+    grid.attach(custom_h_spin, 1, row, 1, 1)
+    grid.attach(custom_unit_combo, 2, row, 1, 1)
+    row += 1
+
+    custom_widgets = (custom_w_label, custom_h_label, custom_w_spin, custom_h_spin, custom_unit_combo)
+    for widget in custom_widgets:
+        widget.set_no_show_all(True)
 
     def on_preset_changed(combo):
         idx = combo.get_active()
         is_custom = PRESETS[idx][1] is None
-        custom_size_entry.set_visible(is_custom)
+        for widget in custom_widgets:
+            widget.set_visible(is_custom)
 
     preset_combo.connect("changed", on_preset_changed)
+
+    def on_custom_unit_changed(combo):
+        new_unit = _key_for_gimp_unit(combo.get_unit())
+        old_unit = current_custom_unit["unit"]
+        if new_unit == old_unit:
+            return
+        current_custom_unit["unit"] = new_unit
+        new_lower, new_upper = size_field_bounds(new_unit)
+        custom_w_adj.set_lower(new_lower)
+        custom_w_adj.set_upper(new_upper)
+        custom_h_adj.set_lower(new_lower)
+        custom_h_adj.set_upper(new_upper)
+        custom_w_adj.set_value(from_inches(to_inches(custom_w_adj.get_value(), old_unit), new_unit))
+        custom_h_adj.set_value(from_inches(to_inches(custom_h_adj.get_value(), old_unit), new_unit))
+
+    custom_unit_combo.connect("changed", on_custom_unit_changed)
 
     on_preset_changed(preset_combo)
     dialog.show_all()
@@ -423,15 +473,15 @@ def show_dialog(image, config):
     result = None
     if response == Gtk.ResponseType.OK:
         print_unit = current_print_unit["unit"]
-        custom_unit = _key_for_gimp_unit(custom_size_entry.get_unit())
-        # print_w_adj/print_h_adj and custom_size_entry's fields are in
+        custom_unit = current_custom_unit["unit"]
+        # print_w_adj/print_h_adj and custom_w_adj/custom_h_adj are in
         # print_unit/custom_unit, not inches - convert before calling
         # get_canvas_size, which (like the rest of Orientation & Placement)
         # only ever works in inches (RCFP-DIALOG-UNIT-005).
         print_w_in = to_inches(print_w_adj.get_value(), print_unit)
         print_h_in = to_inches(print_h_adj.get_value(), print_unit)
-        custom_w_in = to_inches(custom_size_entry.get_value(0), custom_unit)
-        custom_h_in = to_inches(custom_size_entry.get_value(1), custom_unit)
+        custom_w_in = to_inches(custom_w_adj.get_value(), custom_unit)
+        custom_h_in = to_inches(custom_h_adj.get_value(), custom_unit)
         canvas_w_in, canvas_h_in = get_canvas_size(
             image, preset_combo.get_active(),
             print_w_in, print_h_in,
@@ -445,8 +495,8 @@ def show_dialog(image, config):
         )
         config.set_property("print-unit", print_unit)
         config.set_property("preset-idx", preset_combo.get_active())
-        config.set_property("custom-width", custom_size_entry.get_value(0))
-        config.set_property("custom-height", custom_size_entry.get_value(1))
+        config.set_property("custom-width", custom_w_adj.get_value())
+        config.set_property("custom-height", custom_h_adj.get_value())
         config.set_property("custom-unit", custom_unit)
     dialog.destroy()
     return result

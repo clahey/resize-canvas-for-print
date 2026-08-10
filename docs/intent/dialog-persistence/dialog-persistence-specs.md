@@ -8,6 +8,7 @@
 - [x] **RCFP-DIALOG-UI-004**: When the user edits the print-size width field, the system shall recompute the print-size height field from the current image's pixel aspect ratio (width ÷ height); when the user edits the height field, the system shall recompute the width field the same way.
 - [x] **RCFP-DIALOG-UI-005**: While the output-canvas selection is a named preset, the system shall hide the Custom width/height fields.
 - [x] **RCFP-DIALOG-UI-006**: While the output-canvas selection is Custom, the system shall show the Custom width/height fields.
+- [x] **RCFP-DIALOG-UI-007**: For both the print-size group and the Custom canvas-size group, the system shall lay out the width field above the height field, with that group's unit selector beside the height field — matching the layout convention GIMP's own size-entry dialogs use, and identical between the two groups.
 
 ## Persistence
 
@@ -27,6 +28,7 @@
 
 - [x] **RCFP-DIALOG-UNIT-001**: The system shall provide an independent unit selector for the print-size fields and for the Custom canvas-size fields; changing one selector's unit shall not alter the other's.
 - [x] **RCFP-DIALOG-UNIT-006**: Both unit selectors shall offer GIMP's built-in physical length units only (inches, mm, points, picas), excluding pixels and percent.
+- [x] **RCFP-DIALOG-UNIT-007**: The print-size and Custom canvas-size fields' minimum and maximum bounds shall be fixed in inches and converted to the field's group's currently selected unit, recomputed on every unit change, rather than a single flat numeric range reused unconverted across units.
 - [x] **RCFP-DIALOG-UNIT-002**: The system shall display the output-canvas preset dropdown's labels in inches, regardless of the selected print-size unit.
 - [x] **RCFP-DIALOG-UNIT-003**: When the print-size unit selector changes, the system shall convert the currently-displayed value of whichever print-size field (width or height) was most recently edited directly, from the previous unit to the new unit, and shall re-derive the other print-size field from the current crop's aspect ratio.
 - [x] **RCFP-DIALOG-UNIT-004**: When the Custom canvas-size unit selector changes, the system shall convert the currently-displayed values of the Custom width and Custom height fields from the previous unit to the new unit.

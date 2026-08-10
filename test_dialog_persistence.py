@@ -15,7 +15,9 @@ display. PERSIST-002/003/009/011, APPLY-005, and UNIT-001/002/003/004/006,
 whose logic lives inside show_dialog, stay manually/live-verified for the
 same reason - as do PERSIST-004/006/007's unit-conversion-for-display
 clauses specifically (their underlying fit/default computation is still
-covered directly, per above).
+covered directly, per above). UNIT-007's bounds-scaling formula is covered
+directly via size_field_bounds; only its wiring into the live spin buttons
+on unit change is manually/live-verified.
 
 PERSIST-001/008 (declaring PDB arguments and their defaults in
 do_create_procedure) are a real, closeable gap left untested by choice -
@@ -88,6 +90,18 @@ def test_to_inches_converts_one_unit_of_each_kind_to_one_inch(unit, per_inch):
 def test_from_inches_undoes_to_inches():
     for unit in ("in", "mm", "pt", "pica"):
         assert rcfp.from_inches(rcfp.to_inches(5.0, unit), unit) == pytest.approx(5.0)
+
+
+# @spec RCFP-DIALOG-UNIT-007
+def test_print_size_field_bounds_scale_with_unit():
+    lower_in, upper_in = rcfp.size_field_bounds("in")
+    lower_pt, upper_pt = rcfp.size_field_bounds("pt")
+    assert (lower_in, upper_in) == pytest.approx(
+        (rcfp.SIZE_FIELD_LOWER_IN, rcfp.SIZE_FIELD_UPPER_IN))
+    assert (lower_pt, upper_pt) == pytest.approx((lower_in * 72.0, upper_in * 72.0))
+    # 3 inches must fit comfortably within the pt-unit upper bound.
+    assert rcfp.to_inches(upper_pt, "pt") == pytest.approx(upper_in)
+    assert upper_pt > rcfp.from_inches(3.0, "pt")
 
 
 # @spec RCFP-DIALOG-UNIT-005, RCFP-DIALOG-PERSIST-010
