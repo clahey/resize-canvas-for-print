@@ -76,10 +76,10 @@ def test_print_size_from_config_height_axis_below_fit_kept_and_width_rederived()
 # --- unit conversion (RCFP-DIALOG-UNIT-005) ---------------------------------
 
 @pytest.mark.parametrize("unit,per_inch", [
-    ("in", 1.0),
-    ("mm", 25.4),
-    ("pt", 72.0),
-    ("pica", 6.0),
+    (rcfp.Gimp.Unit.inch(), 1.0),
+    (rcfp.Gimp.Unit.mm(), 25.4),
+    (rcfp.Gimp.Unit.point(), 72.0),
+    (rcfp.Gimp.Unit.pica(), 6.0),
 ])
 # @spec RCFP-DIALOG-UNIT-005
 def test_to_inches_converts_one_unit_of_each_kind_to_one_inch(unit, per_inch):
@@ -88,20 +88,22 @@ def test_to_inches_converts_one_unit_of_each_kind_to_one_inch(unit, per_inch):
 
 # @spec RCFP-DIALOG-UNIT-005
 def test_from_inches_undoes_to_inches():
-    for unit in ("in", "mm", "pt", "pica"):
+    for unit in (rcfp.Gimp.Unit.inch(), rcfp.Gimp.Unit.mm(), rcfp.Gimp.Unit.point(), rcfp.Gimp.Unit.pica()):
         assert rcfp.from_inches(rcfp.to_inches(5.0, unit), unit) == pytest.approx(5.0)
 
 
 # @spec RCFP-DIALOG-UNIT-007
 def test_print_size_field_bounds_scale_with_unit():
-    lower_in, upper_in = rcfp.size_field_bounds("in")
-    lower_pt, upper_pt = rcfp.size_field_bounds("pt")
+    inch = rcfp.Gimp.Unit.inch()
+    point = rcfp.Gimp.Unit.point()
+    lower_in, upper_in = rcfp.size_field_bounds(inch)
+    lower_pt, upper_pt = rcfp.size_field_bounds(point)
     assert (lower_in, upper_in) == pytest.approx(
         (rcfp.SIZE_FIELD_LOWER_IN, rcfp.SIZE_FIELD_UPPER_IN))
     assert (lower_pt, upper_pt) == pytest.approx((lower_in * 72.0, upper_in * 72.0))
     # 3 inches must fit comfortably within the pt-unit upper bound.
-    assert rcfp.to_inches(upper_pt, "pt") == pytest.approx(upper_in)
-    assert upper_pt > rcfp.from_inches(3.0, "pt")
+    assert rcfp.to_inches(upper_pt, point) == pytest.approx(upper_in)
+    assert upper_pt > rcfp.from_inches(3.0, point)
 
 
 # @spec RCFP-DIALOG-UNIT-005, RCFP-DIALOG-PERSIST-010
@@ -115,11 +117,11 @@ def test_non_interactive_run_converts_persisted_units_to_inches(run_plugin):
     config = make_config({
         "print-axis": "width",
         "print-value": 72.0,
-        "print-unit": "pt",
+        "print-unit": rcfp.Gimp.Unit.point(),
         "preset-idx": len(rcfp.PRESETS) - 1,  # Custom
         "custom-width": 25.4,
         "custom-height": 50.8,
-        "custom-unit": "mm",
+        "custom-unit": rcfp.Gimp.Unit.mm(),
     })
 
     run_plugin(image, config, rcfp.Gimp.RunMode.WITH_LAST_VALS)
@@ -141,11 +143,11 @@ def default_config():
     return make_config({
         "print-axis": "",
         "print-value": 6.0,
-        "print-unit": "in",
+        "print-unit": rcfp.Gimp.Unit.inch(),
         "preset-idx": len(rcfp.PRESETS) - 1,  # Custom - isolates apply from orientation
         "custom-width": 4.0,
         "custom-height": 6.0,
-        "custom-unit": "in",
+        "custom-unit": rcfp.Gimp.Unit.inch(),
     })
 
 

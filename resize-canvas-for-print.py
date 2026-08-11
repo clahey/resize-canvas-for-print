@@ -27,15 +27,6 @@ PRESETS = [
     ("Custom", None, None),
 ]
 
-# GIMP's built-in physical length units (pixels and percent excluded - see
-# RCFP-DIALOG-UNIT-006). GIMP has no built-in centimeter unit.
-UNITS_PER_INCH = {
-    "in": 1.0,
-    "mm": 25.4,
-    "pt": 72.0,
-    "pica": 6.0,
-}
-
 # Print-size and Custom-canvas-size field bounds, fixed in inches and
 # converted to whichever unit is selected - a flat 0.1-100 range in every
 # unit would let pt/pica max out below a single inch. See RCFP-DIALOG-UNIT-007.
@@ -44,11 +35,11 @@ SIZE_FIELD_UPPER_IN = 100.0
 
 
 def to_inches(value, unit):
-    return value / UNITS_PER_INCH[unit]
+    return value / unit.get_factor()
 
 
 def from_inches(value_in, unit):
-    return value_in * UNITS_PER_INCH[unit]
+    return value_in * unit.get_factor()
 
 
 def size_field_bounds(unit):
@@ -259,20 +250,13 @@ def run_resize_canvas_for_print(image, print_w_in, print_h_in, canvas_w_in, canv
     Gimp.displays_flush()
 
 
-def _gimp_unit_for_key(unit_key):
-    return {
-        "in": Gimp.Unit.inch(),
-        "mm": Gimp.Unit.mm(),
-        "pt": Gimp.Unit.point(),
-        "pica": Gimp.Unit.pica(),
-    }[unit_key]
-
-
-def _key_for_gimp_unit(unit):
-    for key in UNITS_PER_INCH:
-        if _gimp_unit_for_key(key) == unit:
-            return key
-    return "in"
+def _make_unit_combo():
+    """Return a new unit combo box restricted to physical length units
+    (RCFP-DIALOG-UNIT-006)."""
+    store = GimpUi.UnitStore.new(1)
+    store.set_has_pixels(False)
+    store.set_has_percent(False)
+    return GimpUi.UnitComboBox.new_with_model(store)
 
 
 def show_dialog(image, config):
@@ -329,12 +313,8 @@ def show_dialog(image, config):
                                   step_increment=0.1, page_increment=1)
     print_w_spin = Gtk.SpinButton(adjustment=print_w_adj, digits=2)
     print_h_spin = Gtk.SpinButton(adjustment=print_h_adj, digits=2)
-    # NEEDS LIVE-GIMP VERIFICATION: GimpUi.UnitComboBox has no confirmed way
-    # to exclude pixels/percent (RCFP-DIALOG-UNIT-006); an unrecognized
-    # selection falls back to "in" via _key_for_gimp_unit rather than
-    # crashing, but pixels/percent may still be selectable in practice.
-    print_unit_combo = GimpUi.UnitComboBox.new()
-    print_unit_combo.set_unit(_gimp_unit_for_key(default_print_unit))
+    print_unit_combo = _make_unit_combo()
+    print_unit_combo.set_active(default_print_unit)
 
     grid.attach(Gtk.Label(label="Width:", xalign=0), 0, row, 1, 1)
     grid.attach(print_w_spin, 1, row, 1, 1)
@@ -368,7 +348,7 @@ def show_dialog(image, config):
     print_h_adj.connect("value-changed", on_h_changed)
 
     def on_print_unit_changed(combo):
-        new_unit = _key_for_gimp_unit(combo.get_unit())
+        new_unit = combo.get_active()
         old_unit = current_print_unit["unit"]
         if new_unit == old_unit:
             return
@@ -424,8 +404,8 @@ def show_dialog(image, config):
                                    step_increment=0.1, page_increment=1)
     custom_w_spin = Gtk.SpinButton(adjustment=custom_w_adj, digits=2)
     custom_h_spin = Gtk.SpinButton(adjustment=custom_h_adj, digits=2)
-    custom_unit_combo = GimpUi.UnitComboBox.new()
-    custom_unit_combo.set_unit(_gimp_unit_for_key(default_custom_unit))
+    custom_unit_combo = _make_unit_combo()
+    custom_unit_combo.set_active(default_custom_unit)
     current_custom_unit = {"unit": default_custom_unit}
 
     custom_w_label = Gtk.Label(label="Width:", xalign=0)
@@ -451,7 +431,7 @@ def show_dialog(image, config):
     preset_combo.connect("changed", on_preset_changed)
 
     def on_custom_unit_changed(combo):
-        new_unit = _key_for_gimp_unit(combo.get_unit())
+        new_unit = combo.get_active()
         old_unit = current_custom_unit["unit"]
         if new_unit == old_unit:
             return
@@ -530,26 +510,28 @@ class ResizeCanvasForPrint(Gimp.PlugIn):
             "print-axis", "Print size axis last edited",
             "Which of print-width/print-height the user set explicitly last",
             "", GObject.ParamFlags.READWRITE)
+        # 0.1-100 was fine when these were always inches. They're now
+        # stored in whatever unit is selected (print-unit/custom-unit), so
+        # the bounds need enough headroom for a small-unit reading of the
+        # same physical size (e.g. 100in is 7200pt) - RCFP-DIALOG-UNIT-007.
         procedure.add_double_argument(
-            "print-value", "Print size value", "Value of the last-edited print size axis, in inches",
-            0.1, 100.0, 6.0, GObject.ParamFlags.READWRITE)
+            "print-value", "Print size value", "Value of the last-edited print size axis, in print-unit",
+            0.001, 1000000.0, 6.0, GObject.ParamFlags.READWRITE)
         procedure.add_int_argument(
             "preset-idx", "Output canvas preset", "Index into the canvas size preset list",
             0, len(PRESETS) - 1, 0, GObject.ParamFlags.READWRITE)
         procedure.add_double_argument(
-            "custom-width", "Custom canvas width", "Custom canvas width, in inches",
-            0.1, 100.0, PRESETS[0][1], GObject.ParamFlags.READWRITE)
+            "custom-width", "Custom canvas width", "Custom canvas width, in custom-unit",
+            0.001, 1000000.0, PRESETS[0][1], GObject.ParamFlags.READWRITE)
         procedure.add_double_argument(
-            "custom-height", "Custom canvas height", "Custom canvas height, in inches",
-            0.1, 100.0, PRESETS[0][2], GObject.ParamFlags.READWRITE)
-        procedure.add_string_argument(
-            "print-unit", "Print size unit",
-            "Unit print-value is stored in ('in', 'mm', 'pt', or 'pica')",
-            "in", GObject.ParamFlags.READWRITE)
-        procedure.add_string_argument(
-            "custom-unit", "Custom canvas unit",
-            "Unit custom-width/custom-height are stored in ('in', 'mm', 'pt', or 'pica')",
-            "in", GObject.ParamFlags.READWRITE)
+            "custom-height", "Custom canvas height", "Custom canvas height, in custom-unit",
+            0.001, 1000000.0, PRESETS[0][2], GObject.ParamFlags.READWRITE)
+        procedure.add_unit_argument(
+            "print-unit", "Print size unit", "Unit print-value is stored in",
+            False, False, Gimp.Unit.inch(), GObject.ParamFlags.READWRITE)
+        procedure.add_unit_argument(
+            "custom-unit", "Custom canvas unit", "Unit custom-width/custom-height are stored in",
+            False, False, Gimp.Unit.inch(), GObject.ParamFlags.READWRITE)
 
         return procedure
 
@@ -571,10 +553,9 @@ class ResizeCanvasForPrint(Gimp.PlugIn):
             print_w, print_h = print_size_from_config(
                 image, config.get_property("print-axis"), print_value_in,
             )
-            custom_w_in = to_inches(
-                config.get_property("custom-width"), config.get_property("custom-unit"))
-            custom_h_in = to_inches(
-                config.get_property("custom-height"), config.get_property("custom-unit"))
+            custom_unit = config.get_property("custom-unit")
+            custom_w_in = to_inches(config.get_property("custom-width"), custom_unit)
+            custom_h_in = to_inches(config.get_property("custom-height"), custom_unit)
             canvas_w, canvas_h = get_canvas_size(
                 image, config.get_property("preset-idx"), print_w, print_h,
                 custom_w_in, custom_h_in,
