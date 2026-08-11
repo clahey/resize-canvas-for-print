@@ -557,7 +557,7 @@ class ResizeCanvasForPrint(Gimp.PlugIn):
         if run_mode == Gimp.RunMode.INTERACTIVE:
             values = show_dialog(image, config)
             if values is None:
-                return procedure.new_return_values(Gimp.PDBStatusType.CANCEL, None)
+                return procedure.new_return_values(Gimp.PDBStatusType.CANCEL, GLib.Error())
             print_w, print_h, canvas_w, canvas_h = values
         else:
             # WITH_LAST_VALS (Ctrl+F) or NONINTERACTIVE (scripted): config
@@ -582,7 +582,7 @@ class ResizeCanvasForPrint(Gimp.PlugIn):
 
         run_resize_canvas_for_print(image, print_w, print_h, canvas_w, canvas_h)
 
-        return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, None)
+        return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, GLib.Error())
 
 
 if __name__ == "__main__":
