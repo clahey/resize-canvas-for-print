@@ -81,6 +81,7 @@ Only the last *edited* print-size axis is remembered, not both numbers. The prin
 ### Deferred
 1. **Full paper-size preset list.** `PRESETS` currently covers 4x6/5x7/8x10/Custom; a broader standard paper-size list (A-series, other common photo sizes, etc.) is out of scope for the units work and deferred separately.
 2. **Unit dropdown display (abbreviation collapsed, full name expanded).** GIMP's own unit dropdowns show a short abbreviation ("in") in the closed state and the full unit name ("inches") in the open list. Whether `GimpUi.UnitComboBox` reproduces this automatically hasn't been confirmed against a running GIMP. If it doesn't, matching it would need a custom cell-renderer setup on the dropdown; not yet investigated.
+3. **Resolution-scaled field precision.** All four size fields show a fixed 2 decimal digits regardless of unit or resolution. `Gimp.Unit.get_scaled_digits(resolution)` would give the digit count actually needed to distinguish neighboring pixels in the current unit; considered and declined for now to avoid the added wiring (recomputing on every value and unit change) for a cosmetic precision improvement.
 
 ## References
 
